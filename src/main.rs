@@ -167,20 +167,21 @@ fn main() -> Result<()> {
             Arg::with_name("bim")
                 .value_name("FILE")
                 .takes_value(true)
-                .required(true),
+                .required(true)
+                .help("PLINK .bim file to guess the chip type for"),
         )
         .arg(
             Arg::with_name("strandfolder")
                 .value_name("DIR")
                 .takes_value(true)
-                .required(true),
+                .required(true)
+                .help("Directory containing Will Rainer's strand archives"),
         )
-        .arg(Arg::with_name("verbose").short("v").long("verbose"))
         .arg(
-            Arg::with_name("num-results")
-                .short("n")
-                .long("num-results")
-                .takes_value(true),
+            Arg::with_name("verbose")
+                .short("v")
+                .long("verbose")
+                .help("Be verbose and print progress"),
         )
         .get_matches();
 

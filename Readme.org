@@ -1,0 +1,103 @@
+# -*- mode:org -*-
+#+TITLE: Chipmatch
+
+Chipmatch is a tool that tries to identify which chip type has been used for a
+given PLINK dataset. The analysis is based on Will Rayner's [[http://www.well.ox.ac.uk/~wrayner/strand/][Genotyping chips
+strand and build files]].
+
+As of 2018-11-06, his website contains 411 usable annotation files. Analyzing
+650k variants against all 411 chip/build combinations usually takes less than 10
+minutes.
+
+* Compiling
+
+For compilation, you will need a working cargo/Rust installation. If you install
+rust through the [[https://rustup.rs][Rustup Installer]], you will already have a sufficiently recent
+Rust version. After that `cargo build --release` will get you a binary.
+
+Chances are that Jan <j.kaessens@ikmb.uni-kiel.de> has a pre-compiled binary on
+the rzcluster.
+
+* Preparation
+
+Download all the ZIP files from Will Rayner's Website, or at least those you're
+interested in, and dump them to a folder. Do not extract them.
+
+* Running
+
+#+BEGIN_EXAMPLE
+chipmatch 0.1.0
+Jan Christian Kaessens <j.kaessens@ikmb.uni-kiel.de>
+Tries to identify the chip type from a given BIM file
+
+USAGE:
+    chipmatch [FLAGS] <FILE> <DIR>
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+    -v, --verbose    Be verbose and print progress
+
+ARGS:
+    <FILE>    PLINK .bim file to guess the chip type for
+    <DIR>     Directory containing Will Rainer's strand archives
+#+END_EXAMPLE
+
+The program's output consists of three columns:
+- The annotation file name ("strand file") as it appears in the ZIP archive
+- The match rate, i.e. the ratio of variants in the BIM file that have an exact
+  match in the strand file w.r.t. name and position
+- The completeness rate, i.e. the ratio of matched variants vs. the total number
+  of variants in the strand file
+
+Without the `--verbose` switch, only the tab-separated table is printed, without
+header lines, making it easily parseable for script and pipeline embedding.
+
+** Example output:
+
+#+BEGIN_EXAMPLE
+$ chipmatch ../GSA-data/DKTNF.bim ../GSA
+GSA-24v1-0_A6-b37.strand	0.9057662	0.9865884
+GSA-24v1-0_A2-b37.strand	0.9057662	0.9865884
+GSA-24v1-0_A1-b37.strand	0.9057662	0.9865884
+GSA-24v2-0_A1-b37.strand	0.876778	0.92227954
+GSA-24v1-0_A2-b38.strand	0.008157662	0.008886434
+GSA-24v1-0_A1-b38.strand	0.008157662	0.008886434
+GSA-24v1-0_A6-b38.strand	0.008157662	0.008886434
+GSA-24v2-0_A1-b38.strand	0.0079119755	0.008328985
+GSA-24v1-0_A2-b36.strand	0.00016569582	0.00018057342
+GSA-24v1-0_A1-b36.strand	0.00016569582	0.00018057342
+GSA-24v1-0_A6-b36.strand	0.00016569582	0.00018057342
+GSA-24v2-0_A1-b36.strand	0.00015426852	0.00016235182
+#+END_EXAMPLE
+
+** Verbose Example output
+#+BEGIN_EXAMPLE
+$ chipmatch -v ../GSA-data/DKTNF.bim ../GSA
+Reading BIM file...
+700078 variants loaded.
+Scanning ../GSA/GSA-24v1-0_A2-b36-strand.zip
+Scanning ../GSA/GSA-24v2-0_A1-b37-strand.zip
+Scanning ../GSA/GSA-24v1-0_A6-b37-strand.zip
+Scanning ../GSA/GSA-24v1-0_A1-b37-strand.zip
+Scanning ../GSA/GSA-24v1-0_A2-b38-strand.zip
+Scanning ../GSA/GSA-24v2-0_A1-b38-strand.zip
+Scanning ../GSA/GSA-24v1-0_A6-b36-strand.zip
+Scanning ../GSA/GSA-24v1-0_A1-b36-strand.zip
+Scanning ../GSA/GSA-24v1-0_A6-b38-strand.zip
+Scanning ../GSA/GSA-24v1-0_A1-b38-strand.zip
+Scanning ../GSA/GSA-24v2-0_A1-b36-strand.zip
+Scanning ../GSA/GSA-24v1-0_A2-b37-strand.zip
+GSA-24v1-0_A6-b37.strand	0.9057662	0.9865884
+GSA-24v1-0_A2-b37.strand	0.9057662	0.9865884
+GSA-24v1-0_A1-b37.strand	0.9057662	0.9865884
+GSA-24v2-0_A1-b37.strand	0.876778	0.92227954
+GSA-24v1-0_A2-b38.strand	0.008157662	0.008886434
+GSA-24v1-0_A1-b38.strand	0.008157662	0.008886434
+GSA-24v1-0_A6-b38.strand	0.008157662	0.008886434
+GSA-24v2-0_A1-b38.strand	0.0079119755	0.008328985
+GSA-24v1-0_A2-b36.strand	0.00016569582	0.00018057342
+GSA-24v1-0_A1-b36.strand	0.00016569582	0.00018057342
+GSA-24v1-0_A6-b36.strand	0.00016569582	0.00018057342
+GSA-24v2-0_A1-b36.strand	0.00015426852	0.00016235182
+#+END_EXAMPLE
