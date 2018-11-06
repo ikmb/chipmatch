@@ -50,6 +50,8 @@ The program's output consists of three columns:
 - The completeness rate, i.e. the ratio of matched variants vs. the total number
   of variants in the strand file
 
+The table is sorted by match rate and completeness in descending order.
+
 Without the `--verbose` switch, only the tab-separated table is printed, without
 header lines, making it easily parseable for script and pipeline embedding.
 
