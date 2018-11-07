@@ -3,13 +3,19 @@ extern crate zip;
 #[macro_use]
 extern crate clap;
 
+extern crate threadpool;
+
 use std::cmp::{Ordering, PartialEq, PartialOrd};
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Read, Result, Write};
+use std::sync::mpsc::channel;
+use std::sync::{Arc, Mutex};
 
 use clap::{App, Arg};
+
+use threadpool::ThreadPool;
 
 /// When are f32's considered equal?
 /// Needed to establish some flavor of total ordering on floats
@@ -58,26 +64,38 @@ impl Ord for MatchResult {
 // Define a partial order on the MatchResult
 impl PartialOrd for MatchResult {
     fn partial_cmp(&self, other: &MatchResult) -> Option<Ordering> {
-        let my_score = self.name_match_rate * 4000.0
-            + self.name_pos_match_rate * 3000.0
-            + self.strand_match_rate * 2000.0
-            + self.plus_match_rate;
-
-        let other_score = other.name_match_rate * 4000.0
-            + other.name_pos_match_rate * 3000.0
-            + other.strand_match_rate * 2000.0
-            + other.plus_match_rate;
+        let my_score = self.name_match_rate * self.name_pos_match_rate;
+        let other_score = other.name_match_rate * other.name_pos_match_rate;
 
         if my_score < other_score {
             Some(Ordering::Less)
         } else if my_score > other_score {
             Some(Ordering::Greater)
-        } else if (my_score - other_score).abs() < F32_EPSILON {
-            Some(Ordering::Equal)
         } else {
-            eprintln!("score: {} {}", my_score, other_score);
-            panic!("Aaaah!");
+            Some(Ordering::Equal)
         }
+
+        // if self.name_match_rate < other.name_match_rate {
+        //     Some(Ordering::Less)
+        // } else if self.name_match_rate > other.name_match_rate {
+        //     Some(Ordering::Greater)
+        // } else if (other.name_pos_match_rate - self.name_pos_match_rate).abs() < F32_EPSILON {
+        //     if self.name_pos_match_rate < other.name_pos_match_rate {
+        //         Some(Ordering::Less)
+        //     } else if self.name_pos_match_rate > other.name_pos_match_rate {
+        //         Some(Ordering::Greater)
+        //     } else {
+        //         Some(Ordering::Equal)
+        //     }
+        // } else {
+        //     if self.name_match_rate.is_finite() && !other.name_match_rate.is_finite() {
+        //         Some(Ordering::Greater)
+        //     } else if other.name_match_rate.is_finite() && self.name_match_rate.is_finite() {
+        //         Some(Ordering::Less)
+        //     } else {
+        //         Some(Ordering::Equal)
+        //     }
+        // }
     }
 }
 
@@ -88,7 +106,7 @@ impl PartialEq for MatchResult {
 }
 
 fn chromosome_to_number(s: &str) -> u64 {
-    let n = if let Ok(num) = u64::from_str_radix(&s, 10) {
+    if let Ok(num) = u64::from_str_radix(&s, 10) {
         num
     } else {
         match s {
@@ -98,9 +116,7 @@ fn chromosome_to_number(s: &str) -> u64 {
             "M" | "MT" => 26,
             _ => 0,
         }
-    };
-
-    n
+    }
 }
 
 // Reads a list of variants from the BIM file
@@ -362,6 +378,14 @@ fn main() -> Result<()> {
                 .value_name("FILE")
                 .help("Write result table to FILE instead of stdout"),
         )
+        .arg(
+            Arg::with_name("threads")
+                .short("t")
+                .long("threads")
+                .takes_value(true)
+                .value_name("N")
+                .help("Use N threads for computation"),
+        )
         .get_matches();
 
     let verbose = matches.occurrences_of("verbose");
@@ -376,18 +400,44 @@ fn main() -> Result<()> {
     let ziplist = get_zip_list(matches.value_of("strandfolder").unwrap())?;
 
     let mut results = BinaryHeap::new();
-    let mut strandmap: HashMap<String, String> = HashMap::new();
+    let strandmap: HashMap<String, String> = HashMap::new();
+    let num_threads =
+        usize::from_str_radix(matches.value_of("threads").unwrap_or("1"), 10).unwrap();
 
-    for z in ziplist {
-        if verbose > 0 {
-            println!("Scanning {}", z);
-        }
+    let thread_strandmap = Arc::new(Mutex::new(strandmap));
+    let thread_bim = Arc::new(bim);
 
-        let (name, vars) = read_variants_from_zip(&z)?;
-        strandmap.insert(name.to_string(), z);
-        let res = match_bim(&bim, &name, &vars);
-        results.push(res);
+    let pool = ThreadPool::new(num_threads);
+
+    let (tx, rx) = channel();
+    for zipfile in &ziplist {
+        let tx = tx.clone();
+        let mut strandm = thread_strandmap.clone();
+        let zipfile = zipfile.clone();
+        let bim = thread_bim.clone();
+
+        pool.execute(move || {
+            let (name, vars) = read_variants_from_zip(&zipfile).unwrap();
+            {
+                let mut smap = strandm.lock().unwrap();
+                smap.insert(name.to_string(), (&zipfile).to_string());
+            }
+
+            let res = match_bim(&bim, &name, &vars);
+            tx.send(res).unwrap();
+        })
     }
+
+    let mut so_far = 0;
+    for result in rx.iter().take(ziplist.len()) {
+        if !result.name.is_empty() && verbose > 0 {
+            so_far += 1;
+            println!("({}/{}) {} analyzed.", so_far, ziplist.len(), result.name);
+        }
+        results.push(result);
+    }
+
+    let strandmap = thread_strandmap.lock().unwrap();
 
     let mut extract_strands =
         u64::from_str_radix(matches.value_of("extract").unwrap_or("0"), 10).unwrap();
@@ -407,6 +457,10 @@ fn main() -> Result<()> {
             }
             extract_strand(&strandmap[&res.name])?;
             extract_strands -= 1;
+        }
+
+        if res.name.is_empty() {
+            continue;
         }
 
         writeln!(
