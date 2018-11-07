@@ -7,13 +7,14 @@ use std::cmp::{Ordering, PartialEq, PartialOrd};
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Result};
+use std::io::{BufRead, BufReader, Read, Result, Write};
 
 use clap::{App, Arg};
 
 /// When are f32's considered equal?
 /// Needed to establish some flavor of total ordering on floats
 const F32_EPSILON: f32 = 0.00001;
+const EXTRACT_BUFFER_SIZE: usize = 1024 * 1024;
 
 /// The result structure for a single strand file match
 struct MatchResult {
@@ -158,6 +159,28 @@ fn match_bim(bim: &[(String, u64)], name: &str, variants: HashMap<String, u64>) 
     res
 }
 
+fn extract_strand(zipfile: &str) -> Result<()> {
+    let mut zip = zip::ZipArchive::new(File::open(zipfile)?)?;
+
+    let mut buffer = vec![0; EXTRACT_BUFFER_SIZE];
+
+    for i in 0..zip.len() {
+        let mut file = zip.by_index(i).unwrap();
+        if file.name().ends_with(".strand") {
+            let mut target = File::create(file.name())?;
+            while let Ok(size) = file.read(&mut buffer) {
+                if size == 0 {
+                    break;
+                }
+                target.write_all(&buffer[0..size])?;
+            }
+        }
+        break;
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let matches = App::new(crate_name!())
         .version(crate_version!())
@@ -183,6 +206,14 @@ fn main() -> Result<()> {
                 .long("verbose")
                 .help("Be verbose and print progress"),
         )
+        .arg(
+            Arg::with_name("extract")
+                .short("e")
+                .long("extract")
+                .value_name("N")
+                .help("Extract the N most promising strand files to the local working directory")
+                .takes_value(true),
+        )
         .get_matches();
 
     let verbose = matches.occurrences_of("verbose");
@@ -197,6 +228,7 @@ fn main() -> Result<()> {
     let ziplist = get_zip_list(matches.value_of("strandfolder").unwrap())?;
 
     let mut results = BinaryHeap::new();
+    let mut strandmap: HashMap<String, String> = HashMap::new();
 
     for z in ziplist {
         if verbose > 0 {
@@ -204,11 +236,26 @@ fn main() -> Result<()> {
         }
 
         let (name, vars) = read_variants_from_zip(&z)?;
+        strandmap.insert(name.to_string(), z);
         let res = match_bim(&bim, &name, vars);
         results.push(res);
     }
 
+    let mut extract_strands =
+        u32::from_str_radix(matches.value_of("extract").unwrap_or("0"), 10).unwrap();
+
     while let Some(res) = results.pop() {
+        if extract_strands > 0 {
+            if verbose > 0 {
+                println!(
+                    "Extracting {} from {}",
+                    &res.name,
+                    &strandmap.get(&res.name).unwrap()
+                );
+            }
+            extract_strand(strandmap.get(&res.name).unwrap())?;
+            extract_strands -= 1;
+        }
         println!("{}\t{}\t{}", res.name, res.match_rate, res.completeness);
     }
 

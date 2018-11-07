@@ -26,21 +26,26 @@ interested in, and dump them to a folder. Do not extract them.
 * Running
 
 #+BEGIN_EXAMPLE
-chipmatch 0.1.0
+$ chipmatch --help
+chipmatch 0.2.0
 Jan Christian Kaessens <j.kaessens@ikmb.uni-kiel.de>
 Tries to identify the chip type from a given BIM file
 
 USAGE:
-    chipmatch [FLAGS] <FILE> <DIR>
+    chipmatch [FLAGS] [OPTIONS] <FILE> <DIR>
 
 FLAGS:
     -h, --help       Prints help information
     -V, --version    Prints version information
     -v, --verbose    Be verbose and print progress
 
+OPTIONS:
+    -e, --extract <N>    Extract the N most promising strand files to the local working directory
+
 ARGS:
     <FILE>    PLINK .bim file to guess the chip type for
     <DIR>     Directory containing Will Rainer's strand archives
+
 #+END_EXAMPLE
 
 The program's output consists of three columns:
@@ -54,6 +59,8 @@ The table is sorted by match rate and completeness in descending order.
 
 Without the `--verbose` switch, only the tab-separated table is printed, without
 header lines, making it easily parseable for script and pipeline embedding.
+
+
 
 ** Example output:
 
