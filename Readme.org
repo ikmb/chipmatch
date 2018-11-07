@@ -50,15 +50,16 @@ ARGS:
 
 The program's output consists of three columns:
 - The annotation file name ("strand file") as it appears in the ZIP archive
-- The match rate, i.e. the ratio of variants in the BIM file that have an exact
-  match in the strand file w.r.t. name and position
-- The completeness rate, i.e. the ratio of matched variants vs. the total number
-  of variants in the strand file
+- Name match, the ratio of SNPs where a corresponding SNP ID could be found
+- Name/Pos match, the ratio of SNPs with name vs. SNPs with matching name and position
+- Original strand rate, the ratio of SNPs with name and pos, that also have the same alleles (non-AT/CG)
+- Plus strand rate, the ratio of SNPs with name and pos, that also have the same alleles, flipping the reference to "+" (non-AT/CG)
+- AT/CG rate, the ratio of AT/CG SNPs in all SNPs with matching name and position
 
-The table is sorted by match rate and completeness in descending order.
+The table is sorted by match rate and in descending order.
 
-Without the `--verbose` switch, only the tab-separated table is printed, without
-header lines, making it easily parseable for script and pipeline embedding.
+Without the `--verbose` switch, only the tab-separated table is printed, with
+header line, making it easily parseable for script and pipeline embedding.
 
 
 

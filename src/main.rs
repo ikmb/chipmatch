@@ -7,7 +7,7 @@ use std::cmp::{Ordering, PartialEq, PartialOrd};
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Read, Result, Write};
+use std::io::{self, BufRead, BufReader, Read, Result, Write};
 
 use clap::{App, Arg};
 
@@ -22,10 +22,27 @@ struct MatchResult {
     pub name: String,
 
     /// Ratio of how many BIM file entries have successfully matched against the strand file
-    pub match_rate: f32,
+    pub name_match_rate: f32,
+    pub name_pos_match_rate: f32,
+    pub strand_match_rate: f32,
+    pub plus_match_rate: f32,
+    pub atcg_match_rate: f32,
+}
 
-    /// Ratio of BIM file matches vs. total number of variants in strand file
-    pub completeness: f32,
+#[derive(Clone)]
+struct SourceEntry {
+    pub name: String,
+    pub chromosome: u64,
+    pub position: u64,
+    pub alleles: (char, char),
+}
+
+#[derive(Clone)]
+struct VariantEntry {
+    pub chromosome: u64,
+    pub position: u64,
+    pub alleles: (char, char),
+    pub strand: char,
 }
 
 // Define a total order with the help of a partial order on the MatchResult
@@ -41,37 +58,61 @@ impl Ord for MatchResult {
 // Define a partial order on the MatchResult
 impl PartialOrd for MatchResult {
     fn partial_cmp(&self, other: &MatchResult) -> Option<Ordering> {
-        if self.match_rate < other.match_rate {
-            return Some(Ordering::Less);
-        } else if self.match_rate > other.match_rate {
-            return Some(Ordering::Greater);
-        } else if (self.match_rate - other.match_rate).abs() < F32_EPSILON {
-            if self.completeness < other.completeness {
-                return Some(Ordering::Less);
-            } else if self.completeness > other.completeness {
-                return Some(Ordering::Greater);
-            } else if (self.completeness - other.completeness).abs() < F32_EPSILON {
-                return Some(Ordering::Equal);
-            } else {
-                panic!("Completeness is NaN or inf");
-            }
+        let my_score = self.name_match_rate * 4000.0
+            + self.name_pos_match_rate * 3000.0
+            + self.strand_match_rate * 2000.0
+            + self.plus_match_rate;
+
+        let other_score = other.name_match_rate * 4000.0
+            + other.name_pos_match_rate * 3000.0
+            + other.strand_match_rate * 2000.0
+            + other.plus_match_rate;
+
+        if my_score < other_score {
+            Some(Ordering::Less)
+        } else if my_score > other_score {
+            Some(Ordering::Greater)
+        } else if (my_score - other_score).abs() < F32_EPSILON {
+            Some(Ordering::Equal)
         } else {
-            panic!("Match rate is NaN or inf");
+            eprintln!("score: {} {}", my_score, other_score);
+            panic!("Aaaah!");
         }
     }
 }
 
 impl PartialEq for MatchResult {
     fn eq(&self, other: &MatchResult) -> bool {
-        (self.match_rate - other.match_rate).abs() < F32_EPSILON
-            && (self.completeness - other.completeness).abs() < F32_EPSILON
+        self.cmp(&other) == Ordering::Equal
     }
 }
 
+fn chromosome_to_number(s: &str) -> u64 {
+    let n = if let Ok(num) = u64::from_str_radix(&s, 10) {
+        num
+    } else {
+        match s {
+            "X" => 23,
+            "Y" => 24,
+            "XY" => 25,
+            "M" | "MT" => 26,
+            _ => 0,
+        }
+    };
+
+    n
+}
+
 // Reads a list of variants from the BIM file
-fn read_bim(filename: &str) -> Result<Vec<(String, u64)>> {
+fn read_bim(filename: &str) -> Result<Vec<SourceEntry>> {
     let file = File::open(filename)?;
-    let mut names: Vec<(String, u64)> = Vec::new();
+    let mut names: Vec<SourceEntry> = Vec::new();
+    let mut entry = SourceEntry {
+        name: String::from(""),
+        chromosome: 0,
+        position: 0,
+        alleles: ('X', 'X'),
+    };
 
     // Data syntax:
     // <some value> <variant-name*> <some other value> <position*> <some other value> ...
@@ -79,11 +120,15 @@ fn read_bim(filename: &str) -> Result<Vec<(String, u64)>> {
     for line in BufReader::new(file).lines() {
         let line = line?;
         let mut l = line.split_whitespace();
-        let v = l.nth(1).unwrap();
-        let pos = u64::from_str_radix(l.nth(1).unwrap(), 10).unwrap();
-        names.push((v.to_string(), pos));
+        entry.chromosome = chromosome_to_number(l.next().unwrap());
+        entry.name = l.next().unwrap().to_string();
+        entry.position = u64::from_str_radix(l.nth(1).unwrap(), 10).unwrap();
+        entry.alleles.0 = l.next().unwrap().chars().next().unwrap();
+        entry.alleles.1 = l.next().unwrap().chars().next().unwrap();
+
+        names.push(entry.clone());
     }
-    return Ok(names);
+    Ok(names)
 }
 
 // Read a list of ZIP files from the given directory.
@@ -103,10 +148,17 @@ fn get_zip_list(dirname: &str) -> Result<Vec<String>> {
 }
 
 /// Find the strand file within a ZIP archive and extract the variant/position pairs
-fn read_variants_from_zip(filename: &str) -> Result<(String, HashMap<String, u64>)> {
+fn read_variants_from_zip(filename: &str) -> Result<(String, HashMap<String, VariantEntry>)> {
     let mut zip = zip::ZipArchive::new(File::open(filename)?)?;
-    let mut variants: HashMap<String, u64> = HashMap::new();
+    let mut variants = HashMap::new();
     let mut strand_file_name: String = String::new();
+
+    let mut var: VariantEntry = VariantEntry {
+        chromosome: 0,
+        position: 0,
+        alleles: ('X', 'X'),
+        strand: 'X',
+    };
 
     for i in 0..zip.len() {
         let mut file = zip.by_index(i).unwrap();
@@ -115,9 +167,19 @@ fn read_variants_from_zip(filename: &str) -> Result<(String, HashMap<String, u64
             for line in BufReader::new(file).lines() {
                 let line = line?;
                 let mut l = line.split_whitespace();
-                let v = l.next().unwrap().to_string();
-                let pos = u64::from_str_radix(l.nth(1).unwrap(), 10).unwrap_or(0);
-                variants.insert(v, pos);
+
+                let name = l.next().unwrap().to_string();
+                var.chromosome = chromosome_to_number(l.next().unwrap());
+                var.position = u64::from_str_radix(l.next().unwrap(), 10).unwrap_or(0);
+                l.next().unwrap_or("*");
+                var.strand = l.next().unwrap().chars().next().unwrap();
+                //                println!("{} {} {}", var.chromosome, var.position, var.strand);
+
+                // Not all strand files carry allele information
+                let mut alleles = l.next().unwrap_or("XX").chars();
+                var.alleles.0 = alleles.next().unwrap();
+                var.alleles.1 = alleles.next().unwrap();
+                variants.insert(name, var.clone());
             }
             // We don't need more than one strand file
             break;
@@ -127,38 +189,116 @@ fn read_variants_from_zip(filename: &str) -> Result<(String, HashMap<String, u64
     Ok((strand_file_name, variants))
 }
 
-fn match_bim(bim: &[(String, u64)], name: &str, variants: HashMap<String, u64>) -> MatchResult {
+enum AlleleMatch {
+    Original,
+    Plus,
+    ATCG,
+    Mismatch,
+}
+
+fn match_set(left: (char, char), right: (char, char)) -> bool {
+    (left.0 == right.0 || left.0 == right.1) && (left.1 == right.0 || left.1 == right.1)
+}
+
+fn flip_alleles(i: (char, char)) -> (char, char) {
+    let mut res: (char, char) = (' ', ' ');
+
+    res.0 = match i.0 {
+        'A' => 'T',
+        'C' => 'G',
+        'G' => 'C',
+        'T' => 'A',
+        _ => 'X',
+    };
+    res.1 = match i.1 {
+        'A' => 'T',
+        'C' => 'G',
+        'G' => 'C',
+        'T' => 'A',
+        _ => 'X',
+    };
+    res
+}
+
+fn match_alleles(left: (char, char), right: (char, char), strand: char) -> AlleleMatch {
+    if match_set(left, flip_alleles(left)) && match_set(right, flip_alleles(right)) {
+        AlleleMatch::ATCG
+    } else if match_set(left, right) {
+        AlleleMatch::Original
+    } else if match_set(left, flip_alleles(right)) && strand == '-' {
+        AlleleMatch::Plus
+    } else {
+        AlleleMatch::Mismatch
+    }
+}
+
+fn mzinf(score: f32) -> f32 {
+    if score.is_finite() {
+        score
+    } else {
+        0.0
+    }
+}
+
+// Match a BIM file against a strand file
+fn match_bim(
+    bim: &[SourceEntry],
+    name: &str,
+    variants: &HashMap<String, VariantEntry>,
+) -> MatchResult {
     let mut res = MatchResult {
         name: name.to_string(),
-        match_rate: 0.0,
-        completeness: 0.0,
+        name_match_rate: 0.0,
+        name_pos_match_rate: 0.0,
+        strand_match_rate: 0.0,
+        plus_match_rate: 0.0,
+        atcg_match_rate: 0.0,
     };
 
-    let mut match_count = 0;
+    let mut name_matches = 0;
+    let mut name_pos_matches = 0;
 
-    for variant in bim {
-        if let Some(pos) = variants.get(&variant.0 as &str) {
-            if *pos == variant.1 {
-                match_count += 1;
+    let mut strand_matches = 0;
+    let mut plus_matches = 0;
+    let mut atcg_matches = 0;
+
+    for bimentry in bim {
+        if let Some(strand) = variants.get(&bimentry.name) {
+            name_matches += 1;
+
+            if (strand.position == bimentry.position) && (strand.chromosome == bimentry.chromosome)
+            {
+                name_pos_matches += 1;
+
+                match match_alleles(bimentry.alleles, strand.alleles, strand.strand) {
+                    AlleleMatch::ATCG => atcg_matches += 1,
+                    AlleleMatch::Original => strand_matches += 1,
+                    AlleleMatch::Plus => plus_matches += 1,
+                    AlleleMatch::Mismatch => {}
+                }
             }
         }
     }
 
     res.name = name.to_string();
-    res.match_rate = match_count as f32 / bim.len() as f32;
-    res.completeness = match_count as f32 / variants.len() as f32;
+    res.name_match_rate = name_matches as f32 / bim.len() as f32;
+    res.name_pos_match_rate = name_pos_matches as f32 / name_matches as f32;
+    res.strand_match_rate = strand_matches as f32 / (name_pos_matches - atcg_matches) as f32;
+    res.plus_match_rate = plus_matches as f32 / (name_pos_matches - atcg_matches) as f32;
+    res.atcg_match_rate = atcg_matches as f32 / name_pos_matches as f32;
 
-    if !res.match_rate.is_finite() {
-        res.match_rate = 0.0;
-    }
-
-    if !res.completeness.is_finite() {
-        res.completeness = 0.0;
-    }
+    res.name_match_rate = mzinf(res.name_match_rate);
+    res.name_pos_match_rate = mzinf(res.name_pos_match_rate);
+    res.strand_match_rate = mzinf(res.strand_match_rate);
+    res.plus_match_rate = mzinf(res.plus_match_rate);
+    res.atcg_match_rate = mzinf(res.atcg_match_rate);
 
     res
 }
 
+// Extracts a strand file from the given ZIP archive
+// and dumps it to the current working directory by
+// its original name
 fn extract_strand(zipfile: &str) -> Result<()> {
     let mut zip = zip::ZipArchive::new(File::open(zipfile)?)?;
 
@@ -174,8 +314,8 @@ fn extract_strand(zipfile: &str) -> Result<()> {
                 }
                 target.write_all(&buffer[0..size])?;
             }
+            break;
         }
-        break;
     }
 
     Ok(())
@@ -198,7 +338,7 @@ fn main() -> Result<()> {
                 .value_name("DIR")
                 .takes_value(true)
                 .required(true)
-                .help("Directory containing Will Rainer's strand archives"),
+                .help("Directory containing Will Rayner's strand archives"),
         )
         .arg(
             Arg::with_name("verbose")
@@ -213,6 +353,14 @@ fn main() -> Result<()> {
                 .value_name("N")
                 .help("Extract the N most promising strand files to the local working directory")
                 .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("output")
+                .short("o")
+                .long("output")
+                .takes_value(true)
+                .value_name("FILE")
+                .help("Write result table to FILE instead of stdout"),
         )
         .get_matches();
 
@@ -237,26 +385,40 @@ fn main() -> Result<()> {
 
         let (name, vars) = read_variants_from_zip(&z)?;
         strandmap.insert(name.to_string(), z);
-        let res = match_bim(&bim, &name, vars);
+        let res = match_bim(&bim, &name, &vars);
         results.push(res);
     }
 
     let mut extract_strands =
-        u32::from_str_radix(matches.value_of("extract").unwrap_or("0"), 10).unwrap();
+        u64::from_str_radix(matches.value_of("extract").unwrap_or("0"), 10).unwrap();
+
+    // Set output target
+    let mut out_writer: Box<Write> = match matches.value_of("output") {
+        Some(filename) => Box::new(File::create(&filename)?),
+        None => Box::new(io::stdout()),
+    };
+
+    writeln!(&mut out_writer, "strand\tname_match_rate\tpos_match_rate\toriginal_match_rate\tplus_match_rate\tatcg_match_rate")?;
 
     while let Some(res) = results.pop() {
         if extract_strands > 0 {
             if verbose > 0 {
-                println!(
-                    "Extracting {} from {}",
-                    &res.name,
-                    &strandmap.get(&res.name).unwrap()
-                );
+                println!("Extracting {} from {}", &res.name, &strandmap[&res.name]);
             }
-            extract_strand(strandmap.get(&res.name).unwrap())?;
+            extract_strand(&strandmap[&res.name])?;
             extract_strands -= 1;
         }
-        println!("{}\t{}\t{}", res.name, res.match_rate, res.completeness);
+
+        writeln!(
+            &mut out_writer,
+            "{}\t{}\t{}\t{}\t{}\t{}",
+            res.name,
+            res.name_match_rate,
+            res.name_pos_match_rate,
+            res.strand_match_rate,
+            res.strand_match_rate + res.plus_match_rate,
+            res.atcg_match_rate
+        )?;
     }
 
     Ok(())
