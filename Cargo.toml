@@ -1,6 +1,6 @@
 [package]
 name = "chipmatch"
-version = "0.4.0"
+version = "0.4.1"
 authors = ["Jan Christian Kaessens <j.kaessens@ikmb.uni-kiel.de>"]
 description = "Tries to identify the chip type from a given BIM file and checks for orientation"
 

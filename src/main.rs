@@ -17,9 +17,6 @@ use clap::{App, Arg};
 
 use threadpool::ThreadPool;
 
-/// When are f32's considered equal?
-/// Needed to establish some flavor of total ordering on floats
-const F32_EPSILON: f32 = 0.00001;
 const EXTRACT_BUFFER_SIZE: usize = 1024 * 1024;
 
 /// The result structure for a single strand file match
@@ -64,8 +61,8 @@ impl Ord for MatchResult {
 // Define a partial order on the MatchResult
 impl PartialOrd for MatchResult {
     fn partial_cmp(&self, other: &MatchResult) -> Option<Ordering> {
-        let my_score = self.name_match_rate * self.name_pos_match_rate;
-        let other_score = other.name_match_rate * other.name_pos_match_rate;
+        let my_score = self.name_match_rate * self.name_pos_match_rate * if self.strand_match_rate < self.plus_match_rate { self.plus_match_rate } else {self.strand_match_rate};
+        let other_score = other.name_match_rate * other.name_pos_match_rate * if other.strand_match_rate < other.plus_match_rate { other.plus_match_rate } else {self.strand_match_rate};
 
         if my_score < other_score {
             Some(Ordering::Less)
@@ -391,6 +388,7 @@ fn main() -> Result<()> {
     let verbose = matches.occurrences_of("verbose");
 
     if verbose > 0 {
+        println!("This is {} {}.", crate_name!(), crate_version!());
         println!("Reading BIM file...");
     }
     let bim = read_bim(matches.value_of("bim").unwrap())?;
@@ -447,6 +445,7 @@ fn main() -> Result<()> {
         Some(filename) => Box::new(File::create(&filename)?),
         None => Box::new(io::stdout()),
     };
+
 
     writeln!(&mut out_writer, "strand\tname_match_rate\tpos_match_rate\toriginal_match_rate\tplus_match_rate\tatcg_match_rate")?;
 
