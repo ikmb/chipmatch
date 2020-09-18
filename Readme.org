@@ -1,6 +1,9 @@
 # -*- mode:org -*-
 #+TITLE: Chipmatch
 
+![Rust build](https://github.com/ikmb/chipmatch/workflows/Rust/badge.svg?branch=master)
+
+
 Chipmatch is a tool that tries to identify which chip type has been used for a
 given PLINK dataset. The analysis is based on Will Rayner's [[http://www.well.ox.ac.uk/~wrayner/strand/][Genotyping chips
 strand and build files]].
