@@ -27,9 +27,9 @@ interested in, and dump them to a folder. Do not extract them.
 
 #+BEGIN_EXAMPLE
 $ chipmatch --help
-chipmatch 0.2.0
+chipmatch 0.4.1
 Jan Christian Kaessens <j.kaessens@ikmb.uni-kiel.de>
-Tries to identify the chip type from a given BIM file
+Tries to identify the chip type from a given BIM file and checks for orientation
 
 USAGE:
     chipmatch [FLAGS] [OPTIONS] <FILE> <DIR>
@@ -40,12 +40,13 @@ FLAGS:
     -v, --verbose    Be verbose and print progress
 
 OPTIONS:
-    -e, --extract <N>    Extract the N most promising strand files to the local working directory
+    -e, --extract <N>      Extract the N most promising strand files to the local working directory
+    -o, --output <FILE>    Write result table to FILE instead of stdout
+    -t, --threads <N>      Use N threads for computation
 
 ARGS:
     <FILE>    PLINK .bim file to guess the chip type for
-    <DIR>     Directory containing Will Rainer's strand archives
-
+    <DIR>     Directory containing Will Rayner's strand archives
 #+END_EXAMPLE
 
 The program's output consists of three columns:
