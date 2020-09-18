@@ -61,8 +61,20 @@ impl Ord for MatchResult {
 // Define a partial order on the MatchResult
 impl PartialOrd for MatchResult {
     fn partial_cmp(&self, other: &MatchResult) -> Option<Ordering> {
-        let my_score = self.name_match_rate * self.name_pos_match_rate * if self.strand_match_rate < self.plus_match_rate { self.plus_match_rate } else {self.strand_match_rate};
-        let other_score = other.name_match_rate * other.name_pos_match_rate * if other.strand_match_rate < other.plus_match_rate { other.plus_match_rate } else {self.strand_match_rate};
+        let my_score = self.name_match_rate
+            * self.name_pos_match_rate
+            * if self.strand_match_rate < self.plus_match_rate {
+                self.plus_match_rate
+            } else {
+                self.strand_match_rate
+            };
+        let other_score = other.name_match_rate
+            * other.name_pos_match_rate
+            * if other.strand_match_rate < other.plus_match_rate {
+                other.plus_match_rate
+            } else {
+                self.strand_match_rate
+            };
 
         if my_score < other_score {
             Some(Ordering::Less)
@@ -174,7 +186,7 @@ fn read_variants_from_zip(filename: &str) -> Result<(String, HashMap<String, Var
     };
 
     for i in 0..zip.len() {
-        let mut file = zip.by_index(i).unwrap();
+        let file = zip.by_index(i).unwrap();
         if file.name().ends_with(".strand") {
             strand_file_name = file.name().to_string();
             for line in BufReader::new(file).lines() {
@@ -410,7 +422,7 @@ fn main() -> Result<()> {
     let (tx, rx) = channel();
     for zipfile in &ziplist {
         let tx = tx.clone();
-        let mut strandm = thread_strandmap.clone();
+        let strandm = thread_strandmap.clone();
         let zipfile = zipfile.clone();
         let bim = thread_bim.clone();
 
@@ -441,11 +453,10 @@ fn main() -> Result<()> {
         u64::from_str_radix(matches.value_of("extract").unwrap_or("0"), 10).unwrap();
 
     // Set output target
-    let mut out_writer: Box<Write> = match matches.value_of("output") {
+    let mut out_writer: Box<dyn Write> = match matches.value_of("output") {
         Some(filename) => Box::new(File::create(&filename)?),
         None => Box::new(io::stdout()),
     };
-
 
     writeln!(&mut out_writer, "strand\tname_match_rate\tpos_match_rate\toriginal_match_rate\tplus_match_rate\tatcg_match_rate")?;
 
